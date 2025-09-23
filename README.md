@@ -3,9 +3,11 @@
 A comprehensive Telegram bot system that automatically forwards and organizes media content from multiple groups/channels to a centralized backup supergroup. The bot creates organized topics for each source and provides a web-based dashboard for monitoring and configuration.
 
 Support This Project
+
 Like it? Want to support the developer?
 
-👉 Buy Matheus a Coffee
+👉 Buy me a Coffee 
+https://buymeacoffee.com/delagostini
 
 🤝 Credits
 Creator & Maintainer: Matheus Delagostini 
