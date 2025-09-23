@@ -5,9 +5,9 @@ A comprehensive Telegram bot system that automatically forwards and organizes me
 Support This Project
 
 Like it? Want to support the developer?
-
 👉 Buy me a Coffee 
 https://buymeacoffee.com/delagostini
+
 
 🤝 Credits
 Creator & Maintainer: Matheus Delagostini 
