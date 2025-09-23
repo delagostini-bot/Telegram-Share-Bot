@@ -2,23 +2,6 @@
 
 A comprehensive Telegram bot system that automatically forwards and organizes media content from multiple groups/channels to a centralized backup supergroup. The bot creates organized topics for each source and provides a web-based dashboard for monitoring and configuration.
 
-Support This Project
-
-Like it? Want to support the developer?
-👉 Buy me a Coffee 
-https://buymeacoffee.com/delagostini
-
-
-🤝 Credits
-Creator & Maintainer: Matheus Delagostini 
-Code Partner: IA Assistant — Helped debug, structure, optimize, and make everything 100% functional.
-“Without him, this bot wouldn’t be here today!” 😄 
-
-📜 License
-Use, modify, and share freely! Just remember to give me the credits! 
-
-🚀 Made with ❤️ and lots of coffee. Share, contribute, and have fun! 
-
 ## ✨ Features
 
 ### 🔄 **Automatic Media Forwarding**
@@ -370,6 +353,24 @@ Once everything is configured:
 5. **Everything is logged** for monitoring and troubleshooting
 
 **Enjoy your organized media backup system!** 🚀
+
+## ☕ Support This Project
+
+Like it? Want to support the developer?
+
+👉 [Buy me a Coffee](https://buymeacoffee.com/delagostini)
+
+## 🤝 Credits
+
+**Creator & Maintainer:** Matheus Delagostini  
+**Code Partner:** IA Assistant — Helped debug, structure, optimize, and make everything 100% functional.  
+*"Without him, this bot wouldn't be here today!"*
+
+🚀 Made with ❤️ and lots of beer. Share, contribute, and have fun!
+
+## 📜 License
+
+Use, modify, and share freely! Just remember to give me the credits!
 
 ---
 
