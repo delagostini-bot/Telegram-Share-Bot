@@ -10,8 +10,9 @@ import os
 import time
 import re
 import unicodedata
+import tempfile
 from typing import Dict, Optional
-from datetime import datetime  # 👈 ADICIONADO
+from datetime import datetime
 
 import telebot
 from telebot.types import Message
@@ -231,15 +232,10 @@ class TelegramBackupBot:
         """
         Process media to backup supergroup.
         If forwarded, downloads and resends to remove "forwarded from".
-        Always adds caption with source: "— Source: Group Name"
-        
-        Args:
-            message: Message with media
-            
-        Returns:
-            True if successful
+        PRESERVES ORIGINAL CAPTION WHEN AVAILABLE.
         """
         source_name = "Unknown"
+        original_caption = message.caption
         try:
             source_chat = message.chat
             source_name = source_chat.title or source_chat.first_name or f"Chat_{source_chat.id}"
@@ -249,24 +245,29 @@ class TelegramBackupBot:
                 logger.error(f"Could not get/create topic for {source_name}")
                 return False
 
-            original_caption = message.caption or ""
-            new_caption = f"{original_caption}\n\n— Source: {source_name}".strip()
-
             is_forwarded = bool(message.forward_from or message.forward_from_chat)
 
-            if not is_forwarded:
+            # ✅ SEMPRE usa fallback manual para mensagens encaminhadas
+            if is_forwarded:
+                logger.info(f"Forwarded message detected from {source_name}. Skipping copy_message, downloading and resending with original caption...")
+                # Vai direto para o fallback manual
+            else:
+                # Só tenta copy_message se NÃO for encaminhada
                 try:
-                    logger.info(f"Copying original media from {source_name} with new caption...")
+                    logger.info(f"Copying original media from {source_name} with original caption...")
                     self.bot.copy_message(
                         chat_id=BACKUP_GROUP_ID,
                         from_chat_id=message.chat.id,
                         message_id=message.message_id,
                         message_thread_id=topic_id,
-                        caption=new_caption
+                        caption=original_caption
                     )
                     logger.info(f"✅ Media copied successfully from {source_name}")
 
-                    # 📊 Registrar estatísticas — ADICIONADO
+                    # ✅ DELAY DE 5 SEGUNDOS APÓS QUALQUER ENVIO BEM-SUCEDIDO
+                    logger.info("⏳ Waiting 5 seconds to avoid rate-limit...")
+                    time.sleep(5)
+
                     log_forwarded_media(
                         source_topic=source_name,
                         media_type="photo" if message.photo else
@@ -280,136 +281,150 @@ class TelegramBackupBot:
                                    "unknown",
                         message_id=message.message_id
                     )
-
                     return True
                 except Exception as copy_error:
-                    logger.warning(f"copy_message failed (probably media without original caption): {copy_error}")
-            else:
-                logger.info(f"Forwarded message detected from {source_name}. Downloading and resending...")
+                    logger.warning(f"copy_message failed: {copy_error}")
+                    # Se for 429, espera o tempo indicado
+                    if hasattr(copy_error, 'result') and hasattr(copy_error.result, 'error_code') and copy_error.result.error_code == 429:
+                        retry_after = getattr(copy_error.result, 'parameters', {}).get('retry_after', 5)
+                        logger.warning(f"Rate limited. Waiting {retry_after} seconds before fallback...")
+                        time.sleep(retry_after)
 
-            # 🚨 Fallback: manual resend
-            if message.photo:
-                file_id = message.photo[-1].file_id
+            # 🚨 Fallback: manual resend — COM VERIFICAÇÃO DE TAMANHO
+            try:
+                # Determinar file_id
+                if message.photo:
+                    file_id = message.photo[-1].file_id
+                elif message.video:
+                    file_id = message.video.file_id
+                elif message.document:
+                    file_id = message.document.file_id
+                elif message.audio:
+                    file_id = message.audio.file_id
+                elif message.voice:
+                    file_id = message.voice.file_id
+                elif message.video_note:
+                    file_id = message.video_note.file_id
+                elif message.animation:
+                    file_id = message.animation.file_id
+                else:
+                    logger.warning("Unsupported media type")
+                    return False
+
+                # Baixar arquivo
                 file_info = self.bot.get_file(file_id)
                 downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_photo(
-                    chat_id=BACKUP_GROUP_ID,
-                    photo=downloaded_file,
-                    caption=new_caption,
-                    message_thread_id=topic_id
-                )
+                actual_size = len(downloaded_file)
+                logger.info(f"📥 Downloaded {actual_size} bytes")
 
-            elif message.video:
-                file_id = message.video.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_video(
-                    chat_id=BACKUP_GROUP_ID,
-                    video=downloaded_file,
-                    caption=new_caption,
-                    message_thread_id=topic_id
-                )
-
-            elif message.document:
-                file_id = message.document.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_document(
-                    chat_id=BACKUP_GROUP_ID,
-                    document=downloaded_file,
-                    caption=new_caption,
-                    message_thread_id=topic_id
-                )
-
-            elif message.audio:
-                file_id = message.audio.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_audio(
-                    chat_id=BACKUP_GROUP_ID,
-                    audio=downloaded_file,
-                    caption=new_caption,
-                    message_thread_id=topic_id
-                )
-
-            elif message.voice:
-                file_id = message.voice.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_voice(
-                    chat_id=BACKUP_GROUP_ID,
-                    voice=downloaded_file,
-                    caption=new_caption if new_caption.strip() else None,
-                    message_thread_id=topic_id
-                )
-
-            elif message.video_note:
-                file_id = message.video_note.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_video_note(
-                    chat_id=BACKUP_GROUP_ID,
-                    video_note=downloaded_file,
-                    message_thread_id=topic_id
-                )
-                if new_caption.strip():
-                    self.bot.send_message(
-                        chat_id=BACKUP_GROUP_ID,
-                        text=new_caption,
-                        message_thread_id=topic_id
+                # 🔒 Verificação crítica: arquivo vazio ou muito pequeno?
+                if actual_size == 0 or actual_size < 100:
+                    logger.warning(
+                        f"⚠️ File from '{source_name}' appears to be protected or invalid (downloaded size: {actual_size} bytes). "
+                        "Skipping to avoid API errors."
                     )
+                    return False
 
-            elif message.animation:
-                file_id = message.animation.file_id
-                file_info = self.bot.get_file(file_id)
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                self.bot.send_animation(
-                    chat_id=BACKUP_GROUP_ID,
-                    animation=downloaded_file,
-                    caption=new_caption,
-                    message_thread_id=topic_id
+                # Salvar temporariamente
+                suffix = ".bin"
+                if message.photo:
+                    suffix = ".jpg"
+                elif message.video or message.video_note:
+                    suffix = ".mp4"
+                elif message.audio:
+                    suffix = ".mp3"
+                elif message.voice:
+                    suffix = ".ogg"
+                elif message.animation:
+                    suffix = ".gif"
+                elif message.document and message.document.file_name:
+                    ext = os.path.splitext(message.document.file_name)[1]
+                    if ext:
+                        suffix = ext
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                    tmp_file.write(downloaded_file)
+                    tmp_file.flush()
+
+                    with open(tmp_file.name, 'rb') as f:
+                        if message.photo:
+                            self.bot.send_photo(
+                                chat_id=BACKUP_GROUP_ID,
+                                photo=f,
+                                message_thread_id=topic_id,
+                                caption=original_caption
+                            )
+                        elif message.video:
+                            self.bot.send_video(
+                                chat_id=BACKUP_GROUP_ID,
+                                video=f,
+                                message_thread_id=topic_id,
+                                caption=original_caption
+                            )
+                        elif message.document:
+                            self.bot.send_document(
+                                chat_id=BACKUP_GROUP_ID,
+                                document=f,
+                                message_thread_id=topic_id,
+                                caption=original_caption
+                            )
+                        elif message.audio:
+                            self.bot.send_audio(
+                                chat_id=BACKUP_GROUP_ID,
+                                audio=f,
+                                message_thread_id=topic_id,
+                                caption=original_caption
+                            )
+                        elif message.voice:
+                            self.bot.send_voice(
+                                chat_id=BACKUP_GROUP_ID,
+                                voice=f,
+                                message_thread_id=topic_id
+                            )
+                        elif message.video_note:
+                            self.bot.send_video_note(
+                                chat_id=BACKUP_GROUP_ID,
+                                video_note=f,
+                                message_thread_id=topic_id
+                            )
+                        elif message.animation:
+                            self.bot.send_animation(
+                                chat_id=BACKUP_GROUP_ID,
+                                animation=f,
+                                message_thread_id=topic_id,
+                                caption=original_caption
+                            )
+
+                    os.unlink(tmp_file.name)
+
+                logger.info(f"✅ Media resent manually from {source_name}")
+
+                # ✅ DELAY DE 5 SEGUNDOS APÓS QUALQUER ENVIO BEM-SUCEDIDO
+                logger.info("⏳ Waiting 5 seconds to avoid rate-limit...")
+                time.sleep(5)
+
+                log_forwarded_media(
+                    source_topic=source_name,
+                    media_type="photo" if message.photo else
+                               "video" if message.video else
+                               "document" if message.document else
+                               "audio" if message.audio else
+                               "voice" if message.voice else
+                               "video_note" if message.video_note else
+                               "sticker" if message.sticker else
+                               "animation" if message.animation else
+                               "unknown",
+                    message_id=message.message_id
                 )
+                return True
 
-            elif message.sticker:
-                self.bot.send_sticker(
-                    chat_id=BACKUP_GROUP_ID,
-                    sticker=message.sticker.file_id,
-                    message_thread_id=topic_id
-                )
-                if new_caption.strip():
-                    self.bot.send_message(
-                        chat_id=BACKUP_GROUP_ID,
-                        text=new_caption,
-                        message_thread_id=topic_id
-                    )
-
-            else:
-                logger.warning("Unsupported media type for manual resend.")
+            except Exception as send_error:
+                logger.error(f"❌ Error sending media manually: {send_error}")
                 return False
-
-            logger.info(f"✅ Media resent manually from {source_name} (without forward, with source caption)")
-
-            # 📊 Registrar estatísticas — ADICIONADO
-            log_forwarded_media(
-                source_topic=source_name,
-                media_type="photo" if message.photo else
-                           "video" if message.video else
-                           "document" if message.document else
-                           "audio" if message.audio else
-                           "voice" if message.voice else
-                           "video_note" if message.video_note else
-                           "sticker" if message.sticker else
-                           "animation" if message.animation else
-                           "unknown",
-                message_id=message.message_id
-            )
-
-            return True
 
         except Exception as e:
             logger.error(f"❌ Error processing media from {source_name}: {e}")
 
-            # 📊 Registrar falha — ADICIONADO
             try:
                 log_forwarded_media(
                     source_topic=source_name,
@@ -418,7 +433,7 @@ class TelegramBackupBot:
                     status="failed"
                 )
             except Exception:
-                pass  # Não deixar falha de log quebrar o bot
+                pass
 
             return False
     
@@ -428,8 +443,18 @@ class TelegramBackupBot:
         def process_media(message: Message):
             """Process media from group message or channel post"""
             try:
+                # Ignorar mensagens de bots
                 if message.from_user and message.from_user.is_bot:
                     return
+
+                # 🔍 NOVA VERIFICAÇÃO: Ignorar se encaminhado de canal ignorado
+                if message.forward_from_chat:
+                    original_chat_id = message.forward_from_chat.id
+                    if original_chat_id in IGNORED_CHAT_IDS:
+                        logger.info(f"Ignoring forwarded media from ignored channel {original_chat_id}")
+                        return
+
+                # Verificações existentes
                 if message.chat.type not in ['group', 'supergroup', 'channel']:
                     return
                 if message.chat.id in IGNORED_CHAT_IDS:
@@ -480,9 +505,9 @@ class TelegramBackupBot:
                 "📁 **Features:**\n"
                 "• Detects media (photos, videos, documents)\n"
                 "• Resends as new messages — without 'forwarded from...'\n"
-                "• Adds source caption\n"
                 "• Organizes by topics\n"
-                "• Ignores configured channels\n\n"
+                "• Preserves original captions (when supported)\n"
+                "• Ignores configured channels (including forwarded content)\n\n"
                 "✅ **Status:** Active and monitoring media",
                 parse_mode='Markdown'
             )
@@ -517,6 +542,10 @@ class TelegramBackupBot:
             logger.info("Starting Telegram backup bot...")
             me = self.bot.get_me()
             logger.info(f"Bot logged in as: @{me.username}")
+            
+            # 🔑 Descarta atualizações pendentes
+            self.bot.delete_webhook(drop_pending_updates=True)
+            
             logger.info("Bot started successfully! Press Ctrl+C to stop.")
             self.bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
